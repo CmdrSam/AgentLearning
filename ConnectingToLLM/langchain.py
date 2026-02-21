@@ -4,7 +4,6 @@ import os
 load_dotenv()
 
 deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-
 model = ChatOpenAI(api_key=deepseek_API_KEY, base_url="https://api.deepseek.com", model="deepseek-chat")
 
 history = []
