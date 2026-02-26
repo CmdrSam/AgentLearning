@@ -9,8 +9,23 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
 load_dotenv()
+
+
+def get_llm(name: str):
+    if name == "deepseek":
+        return ChatOpenAI(
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            temperature=0,
+        )
+    elif name == "ollama":
+        return ChatOllama(model="gemma3:4b", temperature=0)
+
 
 class SimpleTools:
     def __init__(self):
@@ -121,13 +136,8 @@ def respond_in_plain_english(
 if __name__ == "__main__":
 
     deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-    model = ChatOpenAI(
-        api_key=deepseek_API_KEY,
-        base_url="https://api.deepseek.com",
-        model="deepseek-chat",
-        temperature=0,
-    )
-    agent = SimpleTools()
+    model = get_llm("deepseek")
+    tools = SimpleTools()
 
     while True:
         user_input = input("Enter your command (or type 'exit' to quit): ").strip()
@@ -146,16 +156,16 @@ if __name__ == "__main__":
 
         tool_output = ""
         if tool == "time":
-            tool_output = agent.get_current_time()
+            tool_output = tools.get_current_time()
         elif tool == "add":
-            tool_output = agent.add_numbers(args.get("a"), args.get("b"))
+            tool_output = tools.add_numbers(args.get("a"), args.get("b"))
         elif tool == "create_file":
             filename = args.get("filename")
             content = args.get("content")
             if not filename or content is None:
                 tool_output = "Invalid arguments. Expected filename and content."
             else:
-                tool_output = agent.create_file(str(filename), str(content))
+                tool_output = tools.create_file(str(filename), str(content))
         else:
             tool_output = "Unknown command. Available tools: time, add, create_file, exit."
 

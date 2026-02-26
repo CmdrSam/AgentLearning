@@ -1,10 +1,25 @@
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 import os
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
+
 load_dotenv()
 
+
+def get_llm(name: str):
+    if name == "deepseek":
+        return ChatOpenAI(
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            temperature=0,
+        )
+    elif name == "ollama":
+        return ChatOllama(model="gemma3:4b", temperature=0)
+
 deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-model = ChatOpenAI(api_key=deepseek_API_KEY, base_url="https://api.deepseek.com", model="deepseek-chat")
+model = get_llm("deepseek")
 
 history = []
 
