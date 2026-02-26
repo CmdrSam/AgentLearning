@@ -1,3 +1,4 @@
 dotenv==0.9.9
 langchain-openai==0.3.2
 requests==2.32.3
+langchain_ollama==1.0.1
