@@ -1,10 +1,23 @@
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
+import os
 
 load_dotenv()
+def get_llm(name: str):
+    if name == "deepseek":
+        return ChatOpenAI(
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            temperature=0,
+        )
+    elif name == "ollama":
+        return ChatOllama(model="gemma3:4b", temperature=0)
 
-model = ChatOpenAI(model="gpt-4o")
+deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+model = get_llm("ollama")
 
 
 print("\n----- Prompt with Multiple Placeholders -----\n")

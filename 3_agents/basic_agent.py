@@ -86,6 +86,8 @@ def interpret_user_input(model: ChatOpenAI, user_input: str) -> Dict[str, Any]:
     prompt_value = router_prompt.invoke({"user_input": user_input})
     response = model.invoke(prompt_value)
 
+    print("LLM Response: ", response)
+
     raw = getattr(response, "content", "") or ""
     try:
         data = json.loads(_extract_json_object(raw))
@@ -134,8 +136,7 @@ def respond_in_plain_english(
 
 
 if __name__ == "__main__":
-
-    deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+    
     model = get_llm("deepseek")
     tools = SimpleTools()
 
@@ -148,6 +149,7 @@ if __name__ == "__main__":
             break
 
         tool_call = interpret_user_input(model, user_input)
+        print("Tool calls returned ", tool_call)
         tool = tool_call["tool"]
         args: Dict[str, Any] = tool_call["args"]
 
