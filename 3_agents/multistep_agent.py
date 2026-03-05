@@ -2,7 +2,7 @@ from datetime import datetime
 import json
 import re
 import os
-from typing import Any, Dict, Literal
+from typing import Any, Dict, List, Literal
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
@@ -69,15 +69,17 @@ def interpret_user_input(model: ChatOpenAI, user_input: str) -> Dict[str, Any]:
             (
                 "system",
                 "You are a command router for a CLI agent.\n"
-                "Pick exactly one tool and extract arguments from the user request.\n\n"
+                "You may plan and call multiple tools in sequence, deciding the best order based on the user request.\n"
+                "For each step, choose exactly one tool and its arguments.\n\n"
                 "Tools:\n"
                 '- time: get current time. args: {{}}\n'
                 '- add: add two numbers. args: {{"a": <number>, "b": <number>}}\n'
                 '- create_file: create a file. args: {{"filename": <string>, "content": <string>}}\n'
                 "- exit: quit the program. args: {{}}\n\n"
                 "Return ONLY valid JSON (no markdown, no extra text) with this shape:\n"
-                '{{"tool": "time|add|create_file|exit|unknown", "args": {{}}, "reason": "<short>"}}\n'
-                "If the request does not match a tool, use tool=unknown.",
+                '{{"steps": [{{"tool": "time|add|create_file|exit|unknown", "args": {{}}, "reason": "<short>"}}]}}\n'
+                "If the request does not match any tool, return one step with tool=unknown.\n"
+                "Use multiple steps when the user asks for several actions or when later tools need outputs from earlier ones.",
             ),
             ("human", "{user_input}"),
         ]
@@ -92,32 +94,56 @@ def interpret_user_input(model: ChatOpenAI, user_input: str) -> Dict[str, Any]:
     try:
         data = json.loads(_extract_json_object(raw))
     except Exception:
-        return {"tool": "unknown", "args": {}, "reason": f"Could not parse JSON: {raw[:200]}"}
+        return {
+            "steps": [
+                {
+                    "tool": "unknown",
+                    "args": {},
+                    "reason": f"Could not parse JSON: {raw[:200]}",
+                }
+            ]
+        }
 
-    tool: ToolNames = data.get("tool", "unknown")
-    args = data.get("args") if isinstance(data.get("args"), dict) else {}
-    reason = data.get("reason", "")
-    return {"tool": tool, "args": args, "reason": reason}
+    
+    steps: List[Dict[str, Any]] = []
+
+    if isinstance(data, dict) and "steps" in data and isinstance(data["steps"], list):
+        raw_steps = data["steps"]
+    else:
+        raw_steps = [data]
+
+    for s in raw_steps:
+        if not isinstance(s, dict):
+            continue
+        tool: ToolNames = s.get("tool", "unknown")
+        args = s.get("args") if isinstance(s.get("args"), dict) else {}
+        reason = s.get("reason", "")
+        steps.append({"tool": tool, "args": args, "reason": reason})
+
+    if not steps:
+        steps = [{"tool": "unknown", "args": {}, "reason": "No valid steps returned"}]
+
+    return {"steps": steps}
 
 
 def respond_in_plain_english(
     model: ChatOpenAI,
     user_input: str,
-    tool: ToolNames,
-    args: Dict[str, Any],
-    tool_output: str,
+    tools_results: List[Dict[str, Any]],
 ) -> str:
     response_prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
                 "You are a helpful CLI assistant.\n"
-                "The system can call tools, and you must explain results to the user in plain English.\n"
+                "The system can call tools, potentially multiple times in sequence, and you must explain the combined results to the user in plain English.\n"
                 "Return only the final answer text (no JSON, no markdown).\n\n"
-                "Tool call details:\n"
-                "- tool: {tool}\n"
-                "- args: {args}\n"
-                "- tool_output: {tool_output}\n",
+                "Tool call details are provided as a JSON list, in execution order. Each item has:\n"
+                '- "tool": tool name\n'
+                '- "args": arguments passed\n'
+                '- "reason": why the tool was chosen\n'
+                '- "tool_output": raw output from the tool\n\n'
+                "Use this information to summarize what happened and answer the user clearly.",
             ),
             ("human", "{user_input}"),
         ]
@@ -125,9 +151,7 @@ def respond_in_plain_english(
 
     prompt_value = response_prompt.invoke(
         {
-            "tool": tool,
-            "args": json.dumps(args, ensure_ascii=False),
-            "tool_output": tool_output,
+            "tools_results": json.dumps(tools_results, ensure_ascii=False),
             "user_input": user_input,
         }
     )
@@ -136,7 +160,7 @@ def respond_in_plain_english(
 
 
 if __name__ == "__main__":
-    
+
     model = get_llm("deepseek")
     tools = SimpleTools()
 
@@ -148,27 +172,61 @@ if __name__ == "__main__":
         if user_input.lower() in {"exit", "quit"}:
             break
 
-        tool_call = interpret_user_input(model, user_input)
-        print("Tool calls returned ", tool_call)
-        tool = tool_call["tool"]
-        args: Dict[str, Any] = tool_call["args"]
+        tool_plan = interpret_user_input(model, user_input)
+        print("Tool plan returned ", tool_plan)
 
-        if tool == "exit":
+        steps: List[Dict[str, Any]] = tool_plan.get("steps", [])
+        tools_results: List[Dict[str, Any]] = []
+
+        exit_requested = False
+
+        for step in steps:
+            tool = step.get("tool", "unknown")
+            args: Dict[str, Any] = (
+                step.get("args") if isinstance(step.get("args"), dict) else {}
+            )
+            reason = step.get("reason", "")
+
+            if tool == "exit":
+                exit_requested = True
+                tools_results.append(
+                    {
+                        "tool": tool,
+                        "args": args,
+                        "reason": reason,
+                        "tool_output": "Exiting as requested.",
+                    }
+                )
+                break
+
+            if tool == "time":
+                tool_output = tools.get_current_time()
+            elif tool == "add":
+                tool_output = tools.add_numbers(args.get("a"), args.get("b"))
+            elif tool == "create_file":
+                filename = args.get("filename")
+                content = args.get("content")
+                if not filename or content is None:
+                    tool_output = "Invalid arguments. Expected filename and content."
+                else:
+                    tool_output = tools.create_file(str(filename), str(content))
+            else:
+                tool_output = (
+                    "Unknown command. Available tools: time, add, create_file, exit."
+                )
+
+            tools_results.append(
+                {
+                    "tool": tool,
+                    "args": args,
+                    "reason": reason,
+                    "tool_output": tool_output,
+                }
+            )
+
+        if exit_requested:
+            print(respond_in_plain_english(model, user_input, tools_results))
             break
 
-        tool_output = ""
-        if tool == "time":
-            tool_output = tools.get_current_time()
-        elif tool == "add":
-            tool_output = tools.add_numbers(args.get("a"), args.get("b"))
-        elif tool == "create_file":
-            filename = args.get("filename")
-            content = args.get("content")
-            if not filename or content is None:
-                tool_output = "Invalid arguments. Expected filename and content."
-            else:
-                tool_output = tools.create_file(str(filename), str(content))
-        else:
-            tool_output = "Unknown command. Available tools: time, add, create_file, exit."
+        print(respond_in_plain_english(model, user_input, tools_results))
 
-        print(respond_in_plain_english(model, user_input, tool, args, tool_output))
