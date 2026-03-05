@@ -19,7 +19,7 @@ def get_llm(name: str):
         return ChatOllama(model="gemma3:4b", temperature=0)
 
 deepseek_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-model = get_llm("deepseek")
+model = get_llm("ollama")
 
 history = []
 
